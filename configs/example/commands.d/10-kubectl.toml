@@ -1,0 +1,99 @@
+[executors.kubectl]
+binary = "/usr/local/bin/kubectl"
+timeout = "10s"
+
+[tools."k8s.pods.list"]
+executor = "kubectl"
+argv = ["get", "pods", "-n", "{{namespace}}", "-o", "json"]
+
+[tools."k8s.pods.top"]
+executor = "kubectl"
+argv = ["top", "pods", "-n", "{{namespace}}"]
+
+[tools."k8s.pod.describe"]
+executor = "kubectl"
+argv = ["describe", "pod", "{{pod}}", "-n", "{{namespace}}"]
+
+[tools."k8s.pod.logs"]
+executor = "kubectl"
+argv = ["logs", "-n", "{{namespace}}", "{{pod}}", "--tail={{tail}}"]
+
+[tools."k8s.pod.logs.previous"]
+executor = "kubectl"
+argv = ["logs", "-n", "{{namespace}}", "{{pod}}", "--previous", "--tail={{tail}}"]
+
+[tools."k8s.nodes.list"]
+executor = "kubectl"
+argv = ["get", "nodes", "-o", "json"]
+
+[tools."k8s.nodes.top"]
+executor = "kubectl"
+argv = ["top", "nodes"]
+
+[tools."k8s.node.describe"]
+executor = "kubectl"
+argv = ["describe", "node", "{{node}}"]
+
+[tools."k8s.namespaces.list"]
+executor = "kubectl"
+argv = ["get", "namespaces", "-o", "json"]
+
+[tools."k8s.events.list"]
+executor = "kubectl"
+argv = ["get", "events", "-n", "{{namespace}}", "-o", "json"]
+
+[tools."k8s.deployments.list"]
+executor = "kubectl"
+argv = ["get", "deployments", "-n", "{{namespace}}", "-o", "json"]
+
+[tools."k8s.rollout.status"]
+executor = "kubectl"
+argv = ["rollout", "status", "deployment/{{deployment}}", "-n", "{{namespace}}"]
+
+[tools."k8s.statefulsets.list"]
+executor = "kubectl"
+argv = ["get", "statefulsets", "-n", "{{namespace}}", "-o", "json"]
+
+[tools."k8s.daemonsets.list"]
+executor = "kubectl"
+argv = ["get", "daemonsets", "-n", "{{namespace}}", "-o", "json"]
+
+[tools."k8s.replicasets.list"]
+executor = "kubectl"
+argv = ["get", "replicasets", "-n", "{{namespace}}", "-o", "json"]
+
+[tools."k8s.services.list"]
+executor = "kubectl"
+argv = ["get", "services", "-n", "{{namespace}}", "-o", "json"]
+
+[tools."k8s.service.describe"]
+executor = "kubectl"
+argv = ["describe", "service", "{{service}}", "-n", "{{namespace}}"]
+
+[tools."k8s.endpoints.list"]
+executor = "kubectl"
+argv = ["get", "endpoints", "-n", "{{namespace}}", "-o", "json"]
+
+[tools."k8s.ingresses.list"]
+executor = "kubectl"
+argv = ["get", "ingresses", "-n", "{{namespace}}", "-o", "json"]
+
+[tools."k8s.configmaps.list"]
+executor = "kubectl"
+argv = ["get", "configmaps", "-n", "{{namespace}}", "-o", "json"]
+
+[tools."k8s.jobs.list"]
+executor = "kubectl"
+argv = ["get", "jobs", "-n", "{{namespace}}", "-o", "json"]
+
+[tools."k8s.cronjobs.list"]
+executor = "kubectl"
+argv = ["get", "cronjobs", "-n", "{{namespace}}", "-o", "json"]
+
+[tools."k8s.persistentvolumeclaims.list"]
+executor = "kubectl"
+argv = ["get", "persistentvolumeclaims", "-n", "{{namespace}}", "-o", "json"]
+
+[tools."k8s.persistentvolumes.list"]
+executor = "kubectl"
+argv = ["get", "persistentvolumes", "-o", "json"]

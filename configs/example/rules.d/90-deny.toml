@@ -1,0 +1,9 @@
+[[deny.tokens]]
+name = "shell-composition"
+reason = "command composition is forbidden"
+values = ["|", "&&", "||", ";", "`", "$(", ">", "<"]
+
+[[deny.argv]]
+name = "shell-executables"
+reason = "shell execution is forbidden"
+values = ["sh", "bash", "zsh", "fish", "cmd", "powershell", "pwsh"]

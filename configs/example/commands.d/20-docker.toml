@@ -1,0 +1,63 @@
+[executors.docker]
+binary = "/usr/bin/docker"
+timeout = "10s"
+
+[tools."docker.containers.list"]
+executor = "docker"
+argv = ["ps", "--format", "json"]
+
+[tools."docker.containers.all.list"]
+executor = "docker"
+argv = ["ps", "-a", "--format", "json"]
+
+[tools."docker.container.inspect"]
+executor = "docker"
+argv = ["inspect", "{{container}}"]
+
+[tools."docker.container.logs"]
+executor = "docker"
+argv = ["logs", "--tail", "{{tail}}", "{{container}}"]
+
+[tools."docker.container.stats"]
+executor = "docker"
+argv = ["stats", "--no-stream", "--format", "json", "{{container}}"]
+
+[tools."docker.container.top"]
+executor = "docker"
+argv = ["top", "{{container}}"]
+
+[tools."docker.container.port"]
+executor = "docker"
+argv = ["port", "{{container}}"]
+
+[tools."docker.images.list"]
+executor = "docker"
+argv = ["images", "--format", "json"]
+
+[tools."docker.networks.list"]
+executor = "docker"
+argv = ["network", "ls", "--format", "json"]
+
+[tools."docker.network.inspect"]
+executor = "docker"
+argv = ["network", "inspect", "{{network}}"]
+
+[tools."docker.volumes.list"]
+executor = "docker"
+argv = ["volume", "ls", "--format", "json"]
+
+[tools."docker.volume.inspect"]
+executor = "docker"
+argv = ["volume", "inspect", "{{volume}}"]
+
+[tools."docker.system.info"]
+executor = "docker"
+argv = ["system", "info", "--format", "json"]
+
+[tools."docker.system.df"]
+executor = "docker"
+argv = ["system", "df", "--format", "json"]
+
+[tools."docker.version"]
+executor = "docker"
+argv = ["version", "--format", "json"]
