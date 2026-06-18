@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/BurntSushi/toml"
 	"github.com/spf13/cobra"
 	"github.com/sunpe/doraemon/internal/config"
 	"github.com/sunpe/doraemon/internal/mcp"
@@ -81,6 +83,14 @@ func configCommand(configDir *string) *cobra.Command {
 			}
 			if format != "json" && format != "toml" {
 				return fmt.Errorf("unsupported format %q", format)
+			}
+			if format == "toml" {
+				var buf bytes.Buffer
+				if err := toml.NewEncoder(&buf).Encode(cfg); err != nil {
+					return err
+				}
+				fmt.Fprint(cmd.OutOrStdout(), buf.String())
+				return nil
 			}
 			buf, _ := json.MarshalIndent(cfg, "", "  ")
 			fmt.Fprintln(cmd.OutOrStdout(), string(buf))

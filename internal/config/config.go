@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -13,9 +14,9 @@ import (
 )
 
 type Config struct {
-	System   System
-	Commands Commands
-	Rules    Rules
+	System   System   `toml:"system"`
+	Commands Commands `toml:"commands"`
+	Rules    Rules    `toml:"rules"`
 }
 
 type System struct {
@@ -128,6 +129,16 @@ type HighRiskAllow struct {
 	TokenIDs  []string          `toml:"token_ids"`
 	ExpiresAt time.Time         `toml:"expires_at"`
 	Params    map[string]string `toml:"params"`
+}
+
+var builtinToolNames = []string{"host.status.get", "host.disk.list", "host.process.list", "file.read", "file.list", "audit.query"}
+
+func BuiltinToolNames() []string {
+	return slices.Clone(builtinToolNames)
+}
+
+func IsBuiltinTool(name string) bool {
+	return slices.Contains(builtinToolNames, name)
 }
 
 func Load(dir string) (Config, error) {
@@ -350,7 +361,7 @@ func validate(cfg Config) error {
 	}
 	for name, role := range cfg.Rules.Roles {
 		for _, tool := range role.Tools {
-			if _, ok := cfg.Commands.Tools[tool]; !ok && !isBuiltinTool(tool) {
+			if _, ok := cfg.Commands.Tools[tool]; !ok && !IsBuiltinTool(tool) {
 				return fmt.Errorf("role %q references unknown tool %q", name, tool)
 			}
 		}
@@ -370,7 +381,7 @@ func validate(cfg Config) error {
 		if allow.ExpiresAt.IsZero() {
 			return fmt.Errorf("high_risk.allow %q expires_at is required", allow.Name)
 		}
-		if _, ok := cfg.Commands.Tools[allow.Tool]; !ok && !isBuiltinTool(allow.Tool) {
+		if _, ok := cfg.Commands.Tools[allow.Tool]; !ok && !IsBuiltinTool(allow.Tool) {
 			return fmt.Errorf("high_risk.allow %q references unknown tool %q", allow.Name, allow.Tool)
 		}
 	}
@@ -389,15 +400,6 @@ func containsShellRisk(s string) bool {
 		}
 	}
 	return false
-}
-
-func isBuiltinTool(name string) bool {
-	switch name {
-	case "host.status.get", "host.disk.list", "host.process.list", "file.read", "file.list", "audit.query":
-		return true
-	default:
-		return false
-	}
 }
 
 func isShellExecutable(s string) bool {

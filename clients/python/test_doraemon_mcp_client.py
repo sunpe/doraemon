@@ -1,121 +1,135 @@
-import json
-import threading
 import unittest
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from unittest.mock import patch
 
+from clients.python import doraemon_mcp_client
 from clients.python.doraemon_mcp_client import DoraemonMCPClient, MCPError
 
 
-class RecordingHandler(BaseHTTPRequestHandler):
-    responses = []
-    requests = []
+class FakeTransport:
+    calls = []
 
-    def do_POST(self):
-        length = int(self.headers.get("Content-Length", "0"))
-        body = self.rfile.read(length)
-        self.__class__.requests.append(
+    def __init__(self, url, headers=None, timeout=30, httpx_client_factory=None):
+        self.url = url
+        self.headers = headers or {}
+        self.timeout = timeout
+        self.httpx_client_factory = httpx_client_factory
+
+    async def __aenter__(self):
+        self.__class__.calls.append(
             {
-                "path": self.path,
-                "authorization": self.headers.get("Authorization"),
-                "content_type": self.headers.get("Content-Type"),
-                "body": json.loads(body.decode("utf-8")),
+                "url": self.url,
+                "headers": self.headers,
+                "timeout": self.timeout,
+                "httpx_client_factory": self.httpx_client_factory,
             }
         )
-        status, payload = self.__class__.responses.pop(0)
-        encoded = json.dumps(payload).encode("utf-8")
-        self.send_response(status)
-        self.send_header("Content-Type", "application/json")
-        self.send_header("Content-Length", str(len(encoded)))
-        self.end_headers()
-        self.wfile.write(encoded)
+        return "read-stream", "write-stream", lambda: None
 
-    def log_message(self, format, *args):
-        return
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class FakeTool:
+    def __init__(self, name):
+        self.name = name
+
+
+class FakeListResult:
+    def __init__(self):
+        self.tools = [FakeTool("file.read"), FakeTool("host.status.get")]
+
+
+class FakeCallResult:
+    structuredContent = {"content": {"hostname": "demo"}}
+    isError = False
+    content = []
+
+
+class FakeErrorResult:
+    structuredContent = None
+    isError = True
+
+    def __init__(self):
+        self.content = [type("Text", (), {"text": "unauthorized"})()]
+
+
+class FakeClientSession:
+    calls = []
+    call_result = FakeCallResult()
+
+    def __init__(self, read_stream, write_stream):
+        self.read_stream = read_stream
+        self.write_stream = write_stream
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def initialize(self):
+        self.__class__.calls.append(("initialize",))
+
+    async def list_tools(self):
+        self.__class__.calls.append(("list_tools",))
+        return FakeListResult()
+
+    async def call_tool(self, name, arguments=None):
+        self.__class__.calls.append(("call_tool", name, arguments))
+        return self.__class__.call_result
 
 
 class DoraemonMCPClientTest(unittest.TestCase):
     def setUp(self):
-        RecordingHandler.responses = []
-        RecordingHandler.requests = []
-        self.server = HTTPServer(("127.0.0.1", 0), RecordingHandler)
-        self.thread = threading.Thread(target=self.server.serve_forever)
-        self.thread.daemon = True
-        self.thread.start()
-        self.base_url = f"http://127.0.0.1:{self.server.server_port}"
+        FakeTransport.calls = []
+        FakeClientSession.calls = []
+        FakeClientSession.call_result = FakeCallResult()
 
-    def tearDown(self):
-        self.server.shutdown()
-        self.thread.join(timeout=2)
-        self.server.server_close()
+    def test_list_tools_uses_sdk_streamable_http_client(self):
+        client = DoraemonMCPClient("http://127.0.0.1:8765", "nt_test", timeout=12)
 
-    def test_list_tools_sends_authenticated_json_rpc_request(self):
-        RecordingHandler.responses.append(
-            (
-                200,
-                {
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "result": {"tools": ["file.read", "host.status.get"]},
-                },
-            )
-        )
-        client = DoraemonMCPClient(self.base_url, "nt_test")
-
-        tools = client.list_tools()
+        with self.patch_sdk():
+            tools = client.list_tools()
 
         self.assertEqual(tools, ["file.read", "host.status.get"])
-        self.assertEqual(RecordingHandler.requests[0]["path"], "/mcp")
-        self.assertEqual(RecordingHandler.requests[0]["authorization"], "Bearer nt_test")
-        self.assertEqual(RecordingHandler.requests[0]["content_type"], "application/json")
         self.assertEqual(
-            RecordingHandler.requests[0]["body"],
-            {"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
-        )
-
-    def test_call_tool_sends_name_and_arguments(self):
-        RecordingHandler.responses.append(
-            (
-                200,
+            FakeTransport.calls,
+            [
                 {
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "result": {"content": {"hostname": "demo"}},
-                },
-            )
+                    "url": "http://127.0.0.1:8765/mcp",
+                    "headers": {"Authorization": "Bearer nt_test"},
+                    "timeout": 12,
+                    "httpx_client_factory": client._httpx_client,
+                }
+            ],
         )
-        client = DoraemonMCPClient(self.base_url + "/mcp", "nt_test")
+        self.assertEqual(FakeClientSession.calls, [("initialize",), ("list_tools",)])
 
-        result = client.call_tool("host.status.get", {"verbose": True})
+    def test_call_tool_uses_sdk_session_and_returns_structured_content(self):
+        client = DoraemonMCPClient("http://127.0.0.1:8765/mcp", "nt_test")
+
+        with self.patch_sdk():
+            result = client.call_tool("host.status.get", {"verbose": True})
 
         self.assertEqual(result, {"content": {"hostname": "demo"}})
         self.assertEqual(
-            RecordingHandler.requests[0]["body"],
-            {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "tools/call",
-                "params": {
-                    "name": "host.status.get",
-                    "arguments": {"verbose": True},
-                },
-            },
+            FakeClientSession.calls,
+            [("initialize",), ("call_tool", "host.status.get", {"verbose": True})],
         )
 
-    def test_json_rpc_error_raises_mcp_error(self):
-        RecordingHandler.responses.append(
-            (
-                200,
-                {
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "error": {"code": -32001, "message": "unauthorized"},
-                },
-            )
-        )
-        client = DoraemonMCPClient(self.base_url, "bad")
+    def test_tool_error_raises_mcp_error(self):
+        FakeClientSession.call_result = FakeErrorResult()
+        client = DoraemonMCPClient("http://127.0.0.1:8765", "bad")
 
-        with self.assertRaisesRegex(MCPError, "unauthorized"):
-            client.list_tools()
+        with self.patch_sdk(), self.assertRaisesRegex(MCPError, "unauthorized"):
+            client.call_tool("host.status.get")
+
+    def patch_sdk(self):
+        return patch.multiple(
+            doraemon_mcp_client,
+            streamablehttp_client=lambda *args, **kwargs: FakeTransport(*args, **kwargs),
+            ClientSession=FakeClientSession,
+        )
 
 
 if __name__ == "__main__":

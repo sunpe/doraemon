@@ -1,0 +1,5 @@
+[[paths.read]]
+root = "/var/log"
+
+[[paths.read]]
+root = "/etc/doraemon/readonly"

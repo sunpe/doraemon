@@ -3,6 +3,7 @@ package policy
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -26,7 +27,7 @@ func Authorize(cfg config.Config, principal store.Principal, toolName string, pa
 	if !ok {
 		return Decision{Allowed: false, Reason: "unknown_tool"}, nil
 	}
-	if !roleAllows(cfg.Rules.Roles, principal.Roles, toolName) {
+	if !RoleAllows(cfg.Rules.Roles, principal.Roles, toolName) {
 		return Decision{Allowed: false, Reason: "tool_not_allowed"}, nil
 	}
 	allowName := ""
@@ -65,7 +66,7 @@ func validateParams(cfg config.Config, toolName string, params map[string]string
 	}
 	if strings.HasPrefix(toolName, "k8s.") {
 		ns := params["namespace"]
-		if ns != "" && len(cfg.Rules.Policy.K8s.AllowedNamespaces) > 0 && !contains(cfg.Rules.Policy.K8s.AllowedNamespaces, ns) {
+		if ns != "" && len(cfg.Rules.Policy.K8s.AllowedNamespaces) > 0 && !slices.Contains(cfg.Rules.Policy.K8s.AllowedNamespaces, ns) {
 			return "namespace_not_allowed"
 		}
 		if tail := params["tail"]; tail != "" {
@@ -84,7 +85,7 @@ func validateParams(cfg config.Config, toolName string, params map[string]string
 		}
 	}
 	if strings.HasPrefix(toolName, "docker.") {
-		if container := params["container"]; container != "" && len(cfg.Rules.Policy.Docker.AllowedContainers) > 0 && !contains(cfg.Rules.Policy.Docker.AllowedContainers, container) {
+		if container := params["container"]; container != "" && len(cfg.Rules.Policy.Docker.AllowedContainers) > 0 && !slices.Contains(cfg.Rules.Policy.Docker.AllowedContainers, container) {
 			return "container_not_allowed"
 		}
 		if tail := params["tail"]; tail != "" {
@@ -98,23 +99,21 @@ func validateParams(cfg config.Config, toolName string, params map[string]string
 		}
 	}
 	if strings.HasPrefix(toolName, "host.service.") {
-		if service := params["service"]; service != "" && len(cfg.Rules.Policy.Host.AllowedServices) > 0 && !contains(cfg.Rules.Policy.Host.AllowedServices, service) {
+		if service := params["service"]; service != "" && len(cfg.Rules.Policy.Host.AllowedServices) > 0 && !slices.Contains(cfg.Rules.Policy.Host.AllowedServices, service) {
 			return "service_not_allowed"
 		}
 	}
 	return ""
 }
 
-func roleAllows(roles map[string]config.Role, principalRoles []string, toolName string) bool {
+func RoleAllows(roles map[string]config.Role, principalRoles []string, toolName string) bool {
 	for _, roleName := range principalRoles {
 		role, ok := roles[roleName]
 		if !ok {
 			continue
 		}
-		for _, tool := range role.Tools {
-			if tool == toolName {
-				return true
-			}
+		if slices.Contains(role.Tools, toolName) {
+			return true
 		}
 	}
 	return false
@@ -128,10 +127,10 @@ func highRiskAllowed(allows []config.HighRiskAllow, principal store.Principal, t
 		if !now.Before(allow.ExpiresAt) {
 			continue
 		}
-		if len(allow.Users) > 0 && !contains(allow.Users, principal.User) {
+		if len(allow.Users) > 0 && !slices.Contains(allow.Users, principal.User) {
 			continue
 		}
-		if len(allow.TokenIDs) > 0 && !contains(allow.TokenIDs, principal.TokenID) {
+		if len(allow.TokenIDs) > 0 && !slices.Contains(allow.TokenIDs, principal.TokenID) {
 			continue
 		}
 		matches := true
@@ -195,15 +194,6 @@ func denied(binary string, args []string, deny config.Deny) bool {
 					return true
 				}
 			}
-		}
-	}
-	return false
-}
-
-func contains(values []string, want string) bool {
-	for _, v := range values {
-		if v == want {
-			return true
 		}
 	}
 	return false

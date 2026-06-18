@@ -1,15 +1,14 @@
 package tools
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"os"
 	"runtime"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/sunpe/doraemon/internal/audit"
@@ -30,11 +29,12 @@ type Response struct {
 }
 
 func (s Service) List() []string {
-	names := make([]string, 0, len(s.Config.Commands.Tools)+6)
+	builtins := config.BuiltinToolNames()
+	names := make([]string, 0, len(s.Config.Commands.Tools)+len(builtins))
 	for name := range s.Config.Commands.Tools {
 		names = append(names, name)
 	}
-	names = append(names, []string{"host.status.get", "host.disk.list", "host.process.list", "file.read", "file.list", "audit.query"}...)
+	names = append(names, builtins...)
 	sort.Strings(names)
 	return names
 }
@@ -52,8 +52,8 @@ func (s Service) Call(ctx context.Context, principal store.Principal, toolName s
 		_ = s.Store.WriteAudit(event)
 	}
 
-	if isBuiltin(toolName) {
-		if !roleAllowsBuiltin(s.Config, principal, toolName) {
+	if config.IsBuiltinTool(toolName) {
+		if !policy.RoleAllows(s.Config.Rules.Roles, principal.Roles, toolName) {
 			writeAudit("deny", "tool_not_allowed", nil)
 			return Response{}, errors.New("tool_not_allowed")
 		}
@@ -91,21 +91,6 @@ func (s Service) Call(ctx context.Context, principal store.Principal, toolName s
 		"stderr":    string(result.Stderr),
 		"exit_code": result.ExitCode,
 	}}, nil
-}
-
-func roleAllowsBuiltin(cfg config.Config, principal store.Principal, toolName string) bool {
-	for _, roleName := range principal.Roles {
-		role, ok := cfg.Rules.Roles[roleName]
-		if !ok {
-			continue
-		}
-		for _, tool := range role.Tools {
-			if tool == toolName {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func (s Service) callBuiltin(name string, params map[string]string) (any, error) {
@@ -209,15 +194,6 @@ func readRoots(cfg config.Config) []string {
 	return roots
 }
 
-func isBuiltin(name string) bool {
-	switch name {
-	case "host.status.get", "host.disk.list", "host.process.list", "file.read", "file.list", "audit.query":
-		return true
-	default:
-		return false
-	}
-}
-
 func parseDuration(s string, fallback time.Duration) time.Duration {
 	if s == "" {
 		return fallback
@@ -229,26 +205,30 @@ func parseDuration(s string, fallback time.Duration) time.Duration {
 	return d
 }
 
-func ParamsFromAny(v any) map[string]string {
+func ParamsFromJSON(raw []byte) map[string]string {
 	out := map[string]string{}
-	if v == nil {
+	if len(raw) == 0 {
 		return out
 	}
-	raw, _ := json.Marshal(v)
 	var m map[string]any
-	if err := json.Unmarshal(raw, &m); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(&m); err != nil {
 		return out
 	}
 	for k, value := range m {
 		switch typed := value.(type) {
 		case string:
 			out[k] = typed
-		case float64:
-			out[k] = strconv.FormatFloat(typed, 'f', -1, 64)
+		case json.Number:
+			out[k] = typed.String()
 		case bool:
 			out[k] = strconv.FormatBool(typed)
 		default:
-			out[k] = strings.TrimSpace(fmt.Sprint(typed))
+			rawValue, err := json.Marshal(typed)
+			if err == nil {
+				out[k] = string(rawValue)
+			}
 		}
 	}
 	return out

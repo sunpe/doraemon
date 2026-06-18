@@ -1,6 +1,9 @@
 .cache/
+__pycache__/
+*.py[cod]
 /data/
 /doraemon
+/dist/
 configs/example/data/
 docs/superpowers
 vendor

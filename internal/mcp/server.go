@@ -1,87 +1,95 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
 	"time"
 
+	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/sunpe/doraemon/internal/audit"
 	"github.com/sunpe/doraemon/internal/store"
 	"github.com/sunpe/doraemon/internal/tools"
 )
+
+type principalKey struct{}
 
 type Server struct {
 	Tools tools.Service
 	Store *store.DB
 }
 
-type request struct {
-	JSONRPC string          `json:"jsonrpc"`
-	ID      any             `json:"id"`
-	Method  string          `json:"method"`
-	Params  json.RawMessage `json:"params"`
-}
-
-type response struct {
-	JSONRPC string  `json:"jsonrpc"`
-	ID      any     `json:"id,omitempty"`
-	Result  any     `json:"result,omitempty"`
-	Error   *errObj `json:"error,omitempty"`
-}
-
-type errObj struct {
-	Code    int    `json:"code"`
-	Message string `json:"message"`
-}
-
 func (s Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/mcp", s.handle)
+	mux.Handle("/mcp", s.authMiddleware(s.streamableHandler()))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte("ok\n"))
 	})
 	return mux
 }
 
-func (s Server) handle(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
+func (s Server) streamableHandler() http.Handler {
+	return sdkmcp.NewStreamableHTTPHandler(func(r *http.Request) *sdkmcp.Server {
+		principal, _ := r.Context().Value(principalKey{}).(store.Principal)
+		return s.sdkServer(principal)
+	}, &sdkmcp.StreamableHTTPOptions{
+		JSONResponse: true,
+		Stateless:    true,
+	})
+}
+
+func (s Server) sdkServer(principal store.Principal) *sdkmcp.Server {
+	server := sdkmcp.NewServer(&sdkmcp.Implementation{
+		Name:    "doraemon",
+		Version: "dev",
+	}, nil)
+	for _, name := range s.Tools.List() {
+		toolName := name
+		server.AddTool(&sdkmcp.Tool{
+			Name:        toolName,
+			Description: toolName,
+			InputSchema: map[string]any{
+				"type":                 "object",
+				"additionalProperties": true,
+			},
+		}, func(ctx context.Context, req *sdkmcp.CallToolRequest) (*sdkmcp.CallToolResult, error) {
+			args := map[string]string{}
+			if req.Params != nil && len(req.Params.Arguments) > 0 {
+				args = tools.ParamsFromJSON(req.Params.Arguments)
+			}
+			res, err := s.Tools.Call(ctx, principal, toolName, args)
+			if err != nil {
+				return &sdkmcp.CallToolResult{
+					Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: err.Error()}},
+					IsError: true,
+				}, nil
+			}
+			body, err := json.Marshal(res)
+			if err != nil {
+				return nil, err
+			}
+			return &sdkmcp.CallToolResult{
+				Content:           []sdkmcp.Content{&sdkmcp.TextContent{Text: string(body)}},
+				StructuredContent: map[string]any{"content": res.Content},
+			}, nil
+		})
 	}
-	var req request
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, response{JSONRPC: "2.0", Error: &errObj{Code: -32700, Message: "parse_error"}})
-		return
-	}
-	principal, err := s.authenticate(r)
-	if err != nil {
-		_ = s.Store.WriteAudit(audit.Event{Timestamp: time.Now().UTC(), Decision: "deny", Reason: "unauthorized"})
-		writeJSON(w, response{JSONRPC: "2.0", ID: req.ID, Error: &errObj{Code: -32001, Message: "unauthorized"}})
-		return
-	}
-	switch req.Method {
-	case "tools/list":
-		writeJSON(w, response{JSONRPC: "2.0", ID: req.ID, Result: map[string]any{"tools": s.Tools.List()}})
-	case "tools/call":
-		var p struct {
-			Name      string `json:"name"`
-			Arguments any    `json:"arguments"`
-		}
-		if err := json.Unmarshal(req.Params, &p); err != nil {
-			writeJSON(w, response{JSONRPC: "2.0", ID: req.ID, Error: &errObj{Code: -32602, Message: "invalid_params"}})
-			return
-		}
-		res, err := s.Tools.Call(r.Context(), principal, p.Name, tools.ParamsFromAny(p.Arguments))
+	return server
+}
+
+func (s Server) authMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		principal, err := s.authenticate(r)
 		if err != nil {
-			writeJSON(w, response{JSONRPC: "2.0", ID: req.ID, Error: &errObj{Code: -32000, Message: err.Error()}})
+			_ = s.Store.WriteAudit(audit.Event{Timestamp: time.Now().UTC(), Decision: "deny", Reason: "unauthorized"})
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		writeJSON(w, response{JSONRPC: "2.0", ID: req.ID, Result: res})
-	default:
-		writeJSON(w, response{JSONRPC: "2.0", ID: req.ID, Error: &errObj{Code: -32601, Message: "method_not_found"}})
-	}
+		ctx := context.WithValue(r.Context(), principalKey{}, principal)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
 }
 
 func (s Server) authenticate(r *http.Request) (store.Principal, error) {
@@ -90,9 +98,4 @@ func (s Server) authenticate(r *http.Request) (store.Principal, error) {
 		return store.Principal{}, errors.New("missing bearer token")
 	}
 	return s.Store.AuthenticateToken(strings.TrimSpace(strings.TrimPrefix(auth, "Bearer ")), time.Now())
-}
-
-func writeJSON(w http.ResponseWriter, value any) {
-	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(value)
 }

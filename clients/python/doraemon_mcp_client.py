@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""Small standard-library MCP client for Doraemon."""
+"""Small MCP SDK client for Doraemon."""
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import sys
-import urllib.error
-import urllib.request
 from typing import Any
+
+import httpx
+from mcp import ClientSession
+from mcp.client.streamable_http import streamablehttp_client
 
 
 class MCPError(RuntimeError):
@@ -17,7 +20,13 @@ class MCPError(RuntimeError):
 
 
 class DoraemonMCPClient:
-    def __init__(self, base_url: str, token: str, timeout: float = 30.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        token: str,
+        timeout: float = 30.0,
+        trust_env: bool = False,
+    ) -> None:
         if not base_url:
             raise ValueError("base_url is required")
         if not token:
@@ -25,60 +34,65 @@ class DoraemonMCPClient:
         self.endpoint = self._endpoint(base_url)
         self.token = token
         self.timeout = timeout
-        self._next_id = 1
+        self.trust_env = trust_env
 
     def list_tools(self) -> list[str]:
-        result = self._request("tools/list", {})
-        tools = result.get("tools", [])
-        if not isinstance(tools, list):
-            raise MCPError("invalid tools/list response")
-        return tools
+        return asyncio.run(self._list_tools())
+
+    async def _list_tools(self) -> list[str]:
+        result = await self._with_session(lambda session: session.list_tools())
+        names = []
+        for tool in result.tools:
+            name = getattr(tool, "name", None)
+            if not isinstance(name, str):
+                raise MCPError("invalid tool entry")
+            names.append(name)
+        return names
 
     def call_tool(self, name: str, arguments: dict[str, Any] | None = None) -> Any:
         if not name:
             raise ValueError("tool name is required")
-        return self._request(
-            "tools/call",
-            {"name": name, "arguments": arguments or {}},
-        )
+        return asyncio.run(self._call_tool(name, arguments or {}))
 
-    def _request(self, method: str, params: dict[str, Any]) -> Any:
-        request_id = self._next_id
-        self._next_id += 1
-        payload = {
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "method": method,
-            "params": params,
-        }
-        body = json.dumps(payload).encode("utf-8")
-        request = urllib.request.Request(
-            self.endpoint,
-            data=body,
-            headers={
-                "Authorization": f"Bearer {self.token}",
-                "Content-Type": "application/json",
-            },
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
-                raw = response.read()
-        except urllib.error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise MCPError(f"HTTP {exc.code}: {detail}") from exc
-        except urllib.error.URLError as exc:
-            raise MCPError(str(exc.reason)) from exc
+    async def _call_tool(self, name: str, arguments: dict[str, Any]) -> Any:
+        result = await self._with_session(lambda session: session.call_tool(name, arguments))
+        if getattr(result, "isError", False):
+            raise MCPError(_content_text(result.content) or "tool error")
+        structured = getattr(result, "structuredContent", None)
+        if structured is not None:
+            return structured
+        return {"content": [_content_to_json(content) for content in result.content]}
 
+    async def _with_session(self, operation):
+        headers = {"Authorization": f"Bearer {self.token}"}
         try:
-            decoded = json.loads(raw.decode("utf-8"))
-        except json.JSONDecodeError as exc:
-            raise MCPError("invalid JSON response") from exc
-        if "error" in decoded and decoded["error"] is not None:
-            error = decoded["error"]
-            message = error.get("message", "json-rpc error") if isinstance(error, dict) else str(error)
-            raise MCPError(message)
-        return decoded.get("result")
+            async with streamablehttp_client(
+                self.endpoint,
+                headers=headers,
+                timeout=self.timeout,
+                httpx_client_factory=self._httpx_client,
+            ) as (read_stream, write_stream, _):
+                async with ClientSession(read_stream, write_stream) as session:
+                    await session.initialize()
+                    return await operation(session)
+        except MCPError:
+            raise
+        except Exception as exc:
+            raise MCPError(str(exc)) from exc
+
+    def _httpx_client(
+        self,
+        headers: dict[str, str] | None = None,
+        timeout: httpx.Timeout | None = None,
+        auth: httpx.Auth | None = None,
+    ) -> httpx.AsyncClient:
+        return httpx.AsyncClient(
+            follow_redirects=True,
+            headers=headers,
+            timeout=timeout,
+            auth=auth,
+            trust_env=self.trust_env,
+        )
 
     @staticmethod
     def _endpoint(base_url: str) -> str:
@@ -86,6 +100,23 @@ class DoraemonMCPClient:
         if trimmed.endswith("/mcp"):
             return trimmed
         return trimmed + "/mcp"
+
+
+def _content_text(content: list[Any]) -> str:
+    texts = []
+    for item in content:
+        text = getattr(item, "text", None)
+        if isinstance(text, str):
+            texts.append(text)
+    return "\n".join(texts)
+
+
+def _content_to_json(content: Any) -> Any:
+    if hasattr(content, "model_dump"):
+        return content.model_dump(by_alias=True, exclude_none=True)
+    if hasattr(content, "__dict__"):
+        return content.__dict__
+    return content
 
 
 def _parse_json_object(raw: str) -> dict[str, Any]:
@@ -102,6 +133,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--url", default=os.getenv("DORAEMON_URL", "http://127.0.0.1:8765"))
     parser.add_argument("--token", default=os.getenv("DORAEMON_TOKEN"))
     parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument(
+        "--trust-env",
+        action="store_true",
+        help="allow httpx to use proxy settings from the environment or system",
+    )
 
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("list", help="list available MCP tools")
@@ -118,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
     if not args.token:
         parser.error("--token or DORAEMON_TOKEN is required")
 
-    client = DoraemonMCPClient(args.url, args.token, args.timeout)
+    client = DoraemonMCPClient(args.url, args.token, args.timeout, trust_env=args.trust_env)
     try:
         if args.command == "list":
             result = {"tools": client.list_tools()}

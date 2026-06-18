@@ -1,14 +1,19 @@
 # Doraemon Clients
 
-本目录存放 Doraemon MCP client。client 只负责构造 MCP JSON-RPC 请求并携带 Bearer token；认证、授权、参数策略、路径保护、deny token 和审计仍由 Doraemon 服务端执行。
+本目录存放 Doraemon MCP client。client 只负责连接 MCP Streamable HTTP endpoint 并携带 Bearer token；认证、授权、参数策略、路径保护、deny token 和审计仍由 Doraemon 服务端执行。
 
 ## 当前 client
 
-- Python 标准库 client：[python/doraemon_mcp_client.py](python/doraemon_mcp_client.py)
-- Python client 设计说明：[python/python-mcp-client-design.md](python/python-mcp-client-design.md)
-- Python client 用户指导：[python/python-mcp-client-guide.md](python/python-mcp-client-guide.md)
+- Python SDK client：[python/doraemon_mcp_client.py](python/doraemon_mcp_client.py)
+- Python client 文档：[python/README.md](python/README.md)
 
 ## Python 快速使用
+
+安装依赖：
+
+```bash
+python3 -m pip install -r clients/python/requirements.txt
+```
 
 通过命令行列出工具：
 
