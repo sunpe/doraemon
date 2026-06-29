@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -84,6 +85,7 @@ func (s Server) authMiddleware(next http.Handler) http.Handler {
 		principal, err := s.authenticate(r)
 		if err != nil {
 			_ = s.Store.WriteAudit(audit.Event{Timestamp: time.Now().UTC(), Decision: "deny", Reason: "unauthorized"})
+			slog.Warn("request unauthorized", "path", r.URL.Path, "method", r.Method, "remote_addr", r.RemoteAddr, "reason", "unauthorized")
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}

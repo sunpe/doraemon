@@ -17,3 +17,6 @@ store_stderr = false
 default_timeout = "10s"
 max_stdout_bytes = 1048576
 max_stderr_bytes = 262144
+
+[logging]
+command_execution = false

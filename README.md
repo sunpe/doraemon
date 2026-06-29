@@ -116,6 +116,12 @@ doraemon version
 | `policy test` | `--tool <name>` | 要检查的已配置命令工具名。 |
 | `policy test` | `--input <file>` | 参数 JSON 文件，内容应是对象，例如 `{"namespace":"default"}`。 |
 
+日志配置：
+
+| 配置 | 说明 |
+| --- | --- |
+| `[logging] command_execution = true` | 外部命令执行完成后打印命令、参数、耗时、退出码和 stdout/stderr 字节数；默认关闭，不打印命令输出正文。 |
+
 ## Client
 
 Python client 位于 [clients/python](clients/python)，基于官方 MCP Python SDK：

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -51,7 +52,12 @@ func serveCommand(configDir *string) *cobra.Command {
 			server := mcp.Server{Store: db, Tools: tools.Service{Config: cfg, Store: db}}
 			httpServer := &http.Server{Addr: cfg.System.Server.Listen, Handler: server.Handler()}
 			cmd.Printf("listening on %s\n", cfg.System.Server.Listen)
-			return httpServer.ListenAndServe()
+			slog.Info("server starting", "listen", cfg.System.Server.Listen, "storage_path", cfg.System.Storage.Path)
+			if err := httpServer.ListenAndServe(); err != nil {
+				slog.Error("server stopped", "error", err)
+				return err
+			}
+			return nil
 		},
 	}
 }

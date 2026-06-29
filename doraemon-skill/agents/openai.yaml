@@ -1,0 +1,4 @@
+interface:
+  display_name: "Doraemon Ops"
+  short_description: "Use Doraemon MCP for safe remote operations."
+  default_prompt: "Use Doraemon MCP to inspect a remote host, Docker, Kubernetes, files, or audit logs safely."

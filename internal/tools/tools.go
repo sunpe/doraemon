@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"runtime"
 	"sort"
@@ -50,6 +51,7 @@ func (s Service) Call(ctx context.Context, principal store.Principal, toolName s
 			extra(&event)
 		}
 		_ = s.Store.WriteAudit(event)
+		logToolCall(event)
 	}
 
 	if config.IsBuiltinTool(toolName) {
@@ -77,6 +79,9 @@ func (s Service) Call(ctx context.Context, principal store.Principal, toolName s
 	}
 	timeout := parseDuration(s.Config.System.Limits.DefaultTimeout, 10*time.Second)
 	result := executor.Run(ctx, timeout, decision.Command, decision.Args, s.Config.System.Limits.MaxStdoutBytes, s.Config.System.Limits.MaxStderrBytes)
+	if s.Config.System.Logging.CommandExecution {
+		logCommandExecuted(toolName, decision.Command, decision.Args, result)
+	}
 	writeAudit("allow", "", func(e *audit.Event) {
 		e.Command = decision.Command
 		e.Args = decision.Args
@@ -91,6 +96,48 @@ func (s Service) Call(ctx context.Context, principal store.Principal, toolName s
 		"stderr":    string(result.Stderr),
 		"exit_code": result.ExitCode,
 	}}, nil
+}
+
+func logToolCall(event audit.Event) {
+	attrs := []any{
+		"tool", event.Tool,
+		"user", event.User,
+		"token_id", event.TokenID,
+		"decision", event.Decision,
+		"duration_ms", event.DurationMS,
+	}
+	if event.Reason != "" {
+		attrs = append(attrs, "reason", safeLogReason(event.Reason))
+	}
+	if event.HighRiskAllow != "" {
+		attrs = append(attrs, "high_risk_allow", event.HighRiskAllow)
+	}
+	slog.Info("tool call completed", attrs...)
+}
+
+func logCommandExecuted(toolName, command string, args []string, result executor.Result) {
+	slog.Info("command executed",
+		"tool", toolName,
+		"command", command,
+		"args", args,
+		"duration_ms", result.DurationMS,
+		"exit_code", result.ExitCode,
+		"stdout_bytes", len(result.Stdout),
+		"stderr_bytes", len(result.Stderr),
+	)
+}
+
+func safeLogReason(reason string) string {
+	switch reason {
+	case "tool_not_allowed", "unknown_tool", "high_risk_not_allowed", "invalid_input", "deny_token",
+		"namespace_not_allowed", "invalid_tail", "tail_too_large", "resource_denied",
+		"container_not_allowed", "service_not_allowed":
+		return reason
+	case "":
+		return ""
+	default:
+		return "operation_failed"
+	}
 }
 
 func (s Service) callBuiltin(name string, params map[string]string) (any, error) {

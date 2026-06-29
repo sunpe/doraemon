@@ -1,7 +1,0 @@
-[executors.systemctl]
-binary = "/usr/bin/systemctl"
-timeout = "10s"
-
-[tools."host.service.status"]
-executor = "systemctl"
-argv = ["status", "{{service}}", "--no-pager"]

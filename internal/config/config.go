@@ -24,6 +24,7 @@ type System struct {
 	Storage StorageConfig `toml:"storage"`
 	Audit   AuditConfig   `toml:"audit"`
 	Limits  LimitsConfig  `toml:"limits"`
+	Logging LoggingConfig `toml:"logging"`
 }
 
 type ServerConfig struct {
@@ -48,6 +49,10 @@ type LimitsConfig struct {
 	DefaultTimeout string `toml:"default_timeout"`
 	MaxStdoutBytes int64  `toml:"max_stdout_bytes"`
 	MaxStderrBytes int64  `toml:"max_stderr_bytes"`
+}
+
+type LoggingConfig struct {
+	CommandExecution bool `toml:"command_execution"`
 }
 
 type Commands struct {

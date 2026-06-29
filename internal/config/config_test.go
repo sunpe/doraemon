@@ -61,6 +61,47 @@ tools = ["k8s.pods.list"]
 	}
 }
 
+func TestLoadParsesCommandExecutionLoggingSwitch(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "system.toml"), `
+[server]
+listen = "127.0.0.1:8765"
+
+[storage]
+path = "`+filepath.Join(dir, "doraemon.db")+`"
+
+[logging]
+command_execution = true
+`)
+
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if !cfg.System.Logging.CommandExecution {
+		t.Fatal("expected logging.command_execution to be true")
+	}
+}
+
+func TestLoadDefaultsCommandExecutionLoggingToDisabled(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, filepath.Join(dir, "system.toml"), `
+[server]
+listen = "127.0.0.1:8765"
+
+[storage]
+path = "`+filepath.Join(dir, "doraemon.db")+`"
+`)
+
+	cfg, err := config.Load(dir)
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.System.Logging.CommandExecution {
+		t.Fatal("expected logging.command_execution to default to false")
+	}
+}
+
 func TestLoadRejectsDuplicateToolsAcrossCommandFiles(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, filepath.Join(dir, "system.toml"), `
